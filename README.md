@@ -22,6 +22,15 @@ An MCP server for ClickHouse.
   * List all tables in a database.
   * Input: `database` (string): The name of the database.
 
+* `save_query_results`
+  * Execute a SELECT query and save results to a local file.
+  * Inputs:
+    * `query` (string): The SELECT query to execute
+    * `filepath` (string): Full absolute path where to save the file
+    * `format` (string): Output format - 'csv' or 'json' (default: 'csv')
+  * Returns details about the saved file including filepath and statistics
+  * Creates directories automatically if they don't exist
+
 ## Configuration
 
 1. Open the Claude Desktop configuration file located at:

@@ -97,7 +97,7 @@ class ClickHouseConfig:
         Default: 300 (ClickHouse default)
         """
         return int(os.getenv("CLICKHOUSE_SEND_RECEIVE_TIMEOUT", "300"))
-    
+
     @property
     def proxy_path(self) -> str:
         return os.getenv("CLICKHOUSE_PROXY_PATH")
@@ -123,7 +123,7 @@ class ClickHouseConfig:
         # Add optional database if set
         if self.database:
             config["database"] = self.database
-        
+
         if self.proxy_path:
             config["proxy_path"] = self.proxy_path
 
