@@ -1,8 +1,10 @@
 import logging
 import json
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Literal
 import concurrent.futures
 import atexit
+import os
+import csv
 
 import clickhouse_connect
 from clickhouse_connect.driver.binding import format_query_value
@@ -230,3 +232,131 @@ def get_readonly_setting(client) -> str:
             return read_only.value  # Respect server's readonly setting (likely 2)
     else:
         return "1"  # Default to basic read-only mode if setting isn't present
+
+
+def _save_as_csv(filepath: str, columns: List[str], rows: List[List[Any]]) -> int:
+    """Save query results as CSV file.
+
+    Args:
+        filepath: Full path to the output file
+        columns: List of column names
+        rows: List of rows (each row is a list of values)
+
+    Returns:
+        Number of rows written
+    """
+    with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(columns)
+        writer.writerows(rows)
+    return len(rows)
+
+
+def _save_as_json(filepath: str, columns: List[str], rows: List[List[Any]]) -> int:
+    """Save query results as JSON file.
+
+    Args:
+        filepath: Full path to the output file
+        columns: List of column names
+        rows: List of rows (each row is a list of values)
+
+    Returns:
+        Number of rows written
+    """
+    data = []
+    for row in rows:
+        row_dict = {}
+        for i, col in enumerate(columns):
+            value = row[i]
+            if hasattr(value, '__dict__'):
+                value = str(value)
+            row_dict[col] = value
+        data.append(row_dict)
+
+    with open(filepath, 'w', encoding='utf-8') as jsonfile:
+        json.dump(data, jsonfile, indent=2, default=str)
+
+    return len(rows)
+
+
+def execute_and_save_query(query: str, filepath: str, format: Literal["csv", "json"]):
+    """Execute query and save results to file.
+
+    Args:
+        query: SQL query to execute
+        filepath: Full path where to save the file
+        format: Output format (csv or json)
+
+    Returns:
+        Dict with status and details
+    """
+    if format not in ["csv", "json"]:
+        return {
+            "status": "error",
+            "message": f"Unsupported format: {format}. Supported formats: csv, json"
+        }
+
+    client = create_clickhouse_client()
+    try:
+        read_only = get_readonly_setting(client)
+        result = client.query(query, settings={"readonly": read_only})
+        logger.info(f"Query returned {len(result.result_rows)} rows")
+
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+        if format == "csv":
+            rows_written = _save_as_csv(filepath, result.column_names, result.result_rows)
+        else:
+            rows_written = _save_as_json(filepath, result.column_names, result.result_rows)
+
+        file_size = os.path.getsize(filepath)
+
+        return {
+            "status": "success",
+            "filepath": filepath,
+            "format": format,
+            "rows_written": rows_written,
+            "columns": len(result.column_names),
+            "file_size_bytes": file_size
+        }
+
+    except Exception as e:
+        logger.error(f"Error executing query or saving file: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Failed to execute query or save file: {str(e)}"
+        }
+
+
+@mcp.tool()
+def save_query_results(query: str, filepath: str, format: Literal["csv", "json"] = "csv"):
+    """Save ClickHouse query results to a local file.
+
+    Args:
+        query: SQL query to execute
+        filepath: Full absolute path where to save the file
+        format: Output format - 'csv' or 'json' (default: 'csv')
+
+    Returns:
+        Dict with save operation details including filepath and statistics
+    """
+    logger.info(f"Saving query results to {filepath} in {format} format")
+
+    try:
+        future = QUERY_EXECUTOR.submit(execute_and_save_query, query, filepath, format)
+        try:
+            result = future.result(timeout=SELECT_QUERY_TIMEOUT_SECS)
+            return result
+        except concurrent.futures.TimeoutError:
+            logger.warning(f"Query timed out after {SELECT_QUERY_TIMEOUT_SECS} seconds")
+            future.cancel()
+            return {
+                "status": "error",
+                "message": f"Query timed out after {SELECT_QUERY_TIMEOUT_SECS} seconds"
+            }
+    except Exception as e:
+        logger.error(f"Unexpected error in save_query_results: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Unexpected error: {str(e)}"
+        }

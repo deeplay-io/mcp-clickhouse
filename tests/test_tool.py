@@ -1,8 +1,13 @@
 import unittest
+import os
+import json
+import csv
+import tempfile
+import shutil
 
 from dotenv import load_dotenv
 
-from mcp_clickhouse import create_clickhouse_client, list_databases, list_tables, run_select_query
+from mcp_clickhouse import create_clickhouse_client, list_databases, list_tables, run_select_query, save_query_results
 
 load_dotenv()
 
@@ -91,6 +96,61 @@ class TestClickhouseTools(unittest.TestCase):
         # Verify column comments
         self.assertEqual(columns["id"]["comment"], "Primary identifier")
         self.assertEqual(columns["name"]["comment"], "User name field")
+
+    def test_save_query_results_csv(self):
+        """Test saving query results to CSV file."""
+        test_dir = tempfile.mkdtemp()
+
+        try:
+            query = f"SELECT * FROM {self.test_db}.{self.test_table} ORDER BY id"
+            filepath = os.path.join(test_dir, "test_results.csv")
+
+            result = save_query_results(query, filepath, "csv")
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["format"], "csv")
+            self.assertEqual(result["rows_written"], 2)
+            self.assertEqual(result["columns"], 2)
+
+            self.assertTrue(os.path.exists(filepath))
+
+            with open(filepath, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+
+            self.assertEqual(len(rows), 3)  # header + 2 data rows
+            self.assertEqual(rows[0], ['id', 'name'])
+            self.assertEqual(rows[1], ['1', 'Alice'])
+            self.assertEqual(rows[2], ['2', 'Bob'])
+
+        finally:
+            shutil.rmtree(test_dir)
+
+    def test_save_query_results_json(self):
+        """Test saving query results to JSON file."""
+        test_dir = tempfile.mkdtemp()
+
+        try:
+            query = f"SELECT * FROM {self.test_db}.{self.test_table} ORDER BY id"
+            filepath = os.path.join(test_dir, "test_results.json")
+
+            result = save_query_results(query, filepath, "json")
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["format"], "json")
+            self.assertEqual(result["rows_written"], 2)
+
+            self.assertTrue(os.path.exists(filepath))
+
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            self.assertEqual(len(data), 2)
+            self.assertEqual(data[0], {'id': 1, 'name': 'Alice'})
+            self.assertEqual(data[1], {'id': 2, 'name': 'Bob'})
+
+        finally:
+            shutil.rmtree(test_dir)
 
 
 if __name__ == "__main__":
